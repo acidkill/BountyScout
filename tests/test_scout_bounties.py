@@ -270,9 +270,31 @@ def test_discovery_excludes_own_scout_and_aggregators(monkeypatch):
         {"html_url": "https://github.com/other/awesome-bounties/issues/3"},
         {"html_url": "https://github.com/go-gitea/gitea/issues/4"},
     ]
-    monkeypatch.setattr(scout, "github_pages", lambda url, token: responses)
+    monkeypatch.setattr(
+        scout, "github_pages", lambda url, token, max_pages=2: responses
+    )
 
     found, unknown = scout.discover("test-token")
 
     assert list(found) == ["https://github.com/go-gitea/gitea/issues/4"]
     assert "acidkill/BountyScout" not in unknown
+
+
+def test_discovery_covers_topics_and_awarded_repositories_with_bounded_pages(
+    monkeypatch,
+):
+    calls = []
+
+    def fake_pages(url, token, max_pages=2):
+        calls.append((url, max_pages))
+        return []
+
+    monkeypatch.setattr(scout, "github_pages", fake_pages)
+    scout.discover("test-token")
+
+    assert len(calls) == len(scout.ORGS) + len(scout.SEARCH_TERMS) + len(
+        scout.DISCOVERY_PHRASES
+    ) + len(scout.eligible_repos()) * len(scout.SEARCH_TERMS)
+    assert all(pages == 1 for _, pages in calls)
+    assert any("repo%3Adeskflow/deskflow" in url for url, _ in calls)
+    assert any("Linux%20port%20bounty" in url for url, _ in calls)

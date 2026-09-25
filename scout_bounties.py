@@ -41,6 +41,14 @@ ORGS = (
     "deskflow",
 )
 SEARCH_TERMS = ("bounty", "reward")
+DISCOVERY_PHRASES = (
+    "security bounty",
+    "AI bounty",
+    "MCP bounty",
+    "Rust bounty",
+    "Kubernetes bounty",
+    "Linux port bounty",
+)
 TOPICS = (
     "security",
     "vulnerability",
@@ -204,11 +212,21 @@ def discover(token: str) -> tuple[dict[str, dict], set[str]]:
     found = {}
     queries = [f"org:{org} is:issue is:open bounty in:title,body" for org in ORGS]
     queries += [f"is:issue is:open {term} in:title,body" for term in SEARCH_TERMS]
+    queries += [
+        f"is:issue is:open {phrase} in:title,body" for phrase in DISCOVERY_PHRASES
+    ]
+    queries += [
+        f"repo:{repo} is:issue is:open {term} in:title,body"
+        for repo in eligible_repos()
+        for term in SEARCH_TERMS
+    ]
     for query in queries:
         url = "https://api.github.com/search/issues?q=" + urllib.parse.quote(
             query + " sort:updated-desc"
         )
-        for item in github_pages(url, token):
+        # Keep searches below the authenticated search API's 30/minute budget;
+        # issue comments and timelines retain their own pagination.
+        for item in github_pages(url, token, max_pages=1):
             issue_url = item.get("html_url", "")
             if "/issues/" not in issue_url:
                 continue
