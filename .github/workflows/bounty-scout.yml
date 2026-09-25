@@ -1,42 +1,72 @@
-name: Scout Active Bounties Hourly
+name: Private BountyScout
 
 on:
   schedule:
-    - cron: '0 * * * *' # Runs at minute 0 of every single hour, everyday
-  workflow_dispatch: # Allows manual trigger from the GitHub Actions UI tab
+    # Hourly trigger; the Python Europe/Oslo guard selects every third
+    # weekday hour and every weekend hour, including DST transitions.
+    - cron: "0 * * * *"
+    # Local 08:30 is 06:30 UTC in summer and 07:30 UTC in winter.
+    - cron: "30 6,7 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry-run never sends or persists; trial only on 2026-09-25 at 16:00 Oslo"
+        required: true
+        type: choice
+        default: dry-run
+        options:
+          - dry-run
+          - ping
+          - trial
+          - scan
+          - digest
+
+concurrency:
+  group: bounty-scout-state
+  cancel-in-progress: false
+
+permissions:
+  contents: write
 
 jobs:
   scout:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write # Needed to commit and persist seen_bounties.json state file
-      issues: write   # Needed if you choose Option A (Native GitHub Issue alerts)
-
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
-
-      - name: Run Bounty Scout
+          python-version: "3.12"
+      - name: Install quality tools
+        run: python -m pip install ruff==0.16.0 pytest
+      - name: Verify
+        run: |
+          ruff check .
+          ruff format --check .
+          pytest -q
+      - name: Run private scout
         env:
-          # Required for GitHub API search and native issue notification
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          
-          # Optional: Configure Telegram notification secrets
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          
-          # Optional: Configure Discord notification secrets
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        run: python scout_bounties.py
-
-      - name: Commit & Push Updated Seen Bounties State
+          EVENT_NAME: ${{ github.event_name }}
+          SCHEDULE: ${{ github.event.schedule }}
+          REQUESTED_MODE: ${{ inputs.mode }}
         run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          git add seen_bounties.json || true
-          git diff --quiet && git diff --staged --quiet || (git commit -m "chore: update seen bounties state [skip ci]" && git push)
+          if [ "$EVENT_NAME" = "schedule" ]; then
+            if [ "$SCHEDULE" = "0 * * * *" ]; then mode=scan; else mode=digest; fi
+          else
+            mode="$REQUESTED_MODE"
+          fi
+          python scout_bounties.py --mode "$mode"
+      - name: Persist acknowledged delivery state
+        if: ${{ always() && hashFiles('scout_state.json') != '' }}
+        run: |
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add -- scout_state.json
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: persist confirmed Telegram deliveries [skip ci]"
+            git fetch origin "$GITHUB_REF_NAME"
+            git rebase "origin/$GITHUB_REF_NAME"
+            git push origin "HEAD:$GITHUB_REF_NAME"
+          fi

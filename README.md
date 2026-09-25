@@ -1,71 +1,67 @@
-# 🎯 Bounty Scout: Hourly Notification System
+# BountyScout — private, selective GitHub bounty alerts
 
-A lightweight, state-tracking GitHub bounty scanner that runs **hourly**, searches for new open bounties, filters out competitive/crypto spam, and alerts you instantly.
+The scout looks broadly across GitHub (including SUSE/openSUSE, Red Hat/Fedora,
+Arch/Omarchy, Intel, NVIDIA, AMD, Gitea, Coolify and others). A match is **not**
+an alert by itself: only exact repositories with a named, dated, public award
+record in `AWARD_EVIDENCE` can produce an alert. New repositories found by
+search are reported as source-review candidates; verify their payout record
+before adding them. A completed bounty is evidence of an award, not a guarantee
+of payment for the next issue.
 
-Since it tracks seen bounty URLs, **it will only notify you once per bounty** (no spam).
+Currently enabled evidence:
 
----
+| Exact repository | Public award record |
+| --- | --- |
+| `go-gitea/gitea` | [Excellencedev, 24–25 Mar 2026](https://github.com/go-gitea/gitea/issues/24635) |
+| `spaceandtimefdn/sxt-proof-of-sql` | [Divanshu Grover, 22 Apr 2025](https://github.com/spaceandtimefdn/sxt-proof-of-sql/pull/699) |
+| `deskflow/deskflow` | [mrnicegyu11, 1 May 2025](https://github.com/deskflow/deskflow/issues/8005) |
 
-## 🚀 How It Works
+Coolify's [completed listing](https://algora.io/coollabsio/bounties?status=completed)
+names Murat Aslan but offers only a relative age, so its exact award date
+remains to be established before enabling it. New evidence expires after 730
+days unless refreshed from a public, dated award record.
 
-1. **GitHub Action Scheduled Trigger:** Runs automatically at minute `0` of every hour.
-2. **Scouts GitHub:** Queries active bounty search keywords using the GitHub Search API.
-3. **Triages Candidates:** Skips pull requests, already-assigned issues, overcrowded threads (>25 comments), and crypto-related spam.
-4. **State Machine Comparison:** Composed against `seen_bounties.json` to extract strictly **new** opportunities.
-5. **Instant Notifications:** Dispatches updates through your preferred channel (GitHub Issues, Telegram, or Discord).
-6. **Persists State:** Saves the updated seen list back to the repository so you don't receive duplicate alerts on the next run.
+## Selection
 
----
+- Search GitHub issues with pagination and re-fetch each candidate from the
+  authoritative issue API. Exclude closed/assigned/old issues, linked PRs,
+  visible claims, expired deadlines, and crowded threads.
+- Require one unambiguous USD amount posted by the issue author. Dollar amounts
+  and effort are **estimates**, not a promised rate or confirmed payment.
+- Priority means a narrow task with a conservative time estimate of at most
+  four hours, at least $30 estimated per hour and no more than five comments.
+  Broad Linux ports without narrow acceptance criteria remain review-only.
+- The private daily digest includes at most 15 real positions, priority first
+  and uncertain-effort positions marked “effort to assess”. It does not send
+  an empty message. Urgent scans include up to three *new* priority positions.
 
-## 🛠️ Step-by-Step Setup
+## Setup and safety
 
-### 1. Repository File Structure
-```text
-BountyScout/
-├── .github/
-│   └── workflows/
-│       └── bounty-scout.yml      # GitHub Actions workflow (hourly schedule)
-├── scout_bounties.py              # Core scout + notification script
-├── seen_bounties.json             # Auto-created on first run (state persistence)
-└── README.md
-```
+Add repository Actions secrets `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`
+for your **private** chat. Never commit them. `GITHUB_TOKEN` is supplied by
+GitHub Actions. The workflow has only `contents: write` for delivery-state
+persistence; it cannot create public issues. No code path files external
+claims, comments, PRs or issues.
 
-### 2. Choose Your Notification Method
+Run `python scout_bounties.py --mode dry-run` with a GitHub token to inspect
+selection without sending or writing state. `--mode ping` sends exactly one
+private connectivity message, without claiming a bounty or changing state. Run
+`ruff check .`, `ruff format --check .` and `pytest -q` before enabling
+the default-branch schedule. In Actions, dispatch `dry-run` first; after
+adding Telegram secrets and inspecting that run, dispatch `trial` **only at
+16:00 Europe/Oslo on 25 September 2026** for the one-time test. The trial
+does nothing outside that hour. A private test message and persisted state
+must be checked before activating regular scheduled delivery.
 
-#### 📬 Option A: Native GitHub Issues (Zero Setup - Recommended)
-The script will automatically open a structured issue labeled `bounty-alert` in your own repository containing links to the new opportunities.
-- **Why it's great:** Zero setup! You will get an email and/or mobile push notification directly from the GitHub app if you are watching your repository.
-- **Setup:** None required. The built-in `GITHUB_TOKEN` handles everything.
+On the default branch, hourly UTC triggers are locally gated to every three
+hours on weekdays and hourly on weekends. Two UTC 06:30/07:30 triggers are
+gated to 08:30 Europe/Oslo, including daylight saving transitions. GitHub
+scheduled triggers can be delayed; 08:30 is the target, not a hard SLA.
 
----
-
-#### 💬 Option B: Telegram Channel/Chat Alerts
-The scout will send markdown alerts directly to your Telegram chat or channel.
-
-1. **Create a Bot:** Message `@BotFather` on Telegram, send `/newbot`, and copy the **API Token**.
-2. **Get your Chat ID:** Send a message to your new bot, then open `https://api.telegram.org/botYOUR_BOT_TOKEN/getUpdates` in your browser. Look for `"chat":{"id":123456789}`. Copy that numeric ID.
-3. **Add Secrets to GitHub:**
-   - Go to your repository **Settings** > **Secrets and variables** > **Actions**.
-   - Create a repository secret named `TELEGRAM_BOT_TOKEN` with your bot's token.
-   - Create a repository secret named `TELEGRAM_CHAT_ID` with your numeric chat ID.
-
----
-
-#### 🎮 Option C: Discord Channel Alerts
-The scout will push formatted alerts directly to a channel in your Discord server.
-
-1. **Create Webhook:** Go to your Discord server, click channel settings (gear icon) > **Integrations** > **Webhooks** > **Create Webhook**. Copy the Webhook URL.
-2. **Add Secrets to GitHub:**
-   - Go to your repository **Settings** > **Secrets and variables** > **Actions**.
-   - Create a repository secret named `DISCORD_WEBHOOK_URL` with your webhook URL.
-
----
-
-## 🧪 Triggering Manually
-You can test the setup immediately without waiting for the next hour:
-1. Go to your repository on GitHub.
-2. Click on the **Actions** tab.
-3. Select **Scout Active Bounties Hourly** from the sidebar.
-4. Click the **Run workflow** dropdown and select **Run workflow**.
-
-Happy bounty hunting! 🚀
+`seen_bounties.json` is legacy history and remains unchanged. The first
+acknowledged Telegram delivery migrates it into versioned `scout_state.json`,
+which suppresses previous URLs. State is written atomically after each
+Telegram `ok: true` response, then committed by Actions even if a later
+entry fails. An ambiguous network failure after server-side delivery can
+still duplicate one message on retry; Telegram provides no idempotency key.
+Never erase state merely to force a fresh digest.
