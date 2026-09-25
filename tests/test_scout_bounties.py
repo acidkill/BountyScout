@@ -261,3 +261,18 @@ def test_no_empty_digest_or_state_write(monkeypatch, tmp_path):
     path = tmp_path / "state.json"
     assert scout.deliver([], {"delivered": {}}, "token", "chat", path=path) == []
     assert not path.exists()
+
+
+def test_discovery_excludes_own_scout_and_aggregators(monkeypatch):
+    responses = [
+        {"html_url": "https://github.com/acidkill/BountyScout/issues/1"},
+        {"html_url": "https://github.com/other/BountyScout/issues/2"},
+        {"html_url": "https://github.com/other/awesome-bounties/issues/3"},
+        {"html_url": "https://github.com/go-gitea/gitea/issues/4"},
+    ]
+    monkeypatch.setattr(scout, "github_pages", lambda url, token: responses)
+
+    found, unknown = scout.discover("test-token")
+
+    assert list(found) == ["https://github.com/go-gitea/gitea/issues/4"]
+    assert "acidkill/BountyScout" not in unknown

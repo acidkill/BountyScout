@@ -62,6 +62,10 @@ TOPICS = (
     "deployment",
 )
 BLOCKED = ("airdrop", "referral", "casino", "gambling", "trading bot")
+AGGREGATOR_NAME = re.compile(
+    r"(?:^|[-_])(?:awesome|bounties|bounty-list|bountyscout)(?:$|[-_])",
+    re.IGNORECASE,
+)
 CLAIM = ("claiming", "i'll take", "i will take", "working on this", "/attempt")
 AMOUNT = re.compile(
     r"(?:\$\s*([\d,]+(?:\.\d{1,2})?)|\bUSD\s*([\d,]+(?:\.\d{1,2})?))", re.IGNORECASE
@@ -205,8 +209,16 @@ def discover(token: str) -> tuple[dict[str, dict], set[str]]:
             query + " sort:updated-desc"
         )
         for item in github_pages(url, token):
-            if item.get("html_url"):
-                found[item["html_url"]] = item
+            issue_url = item.get("html_url", "")
+            if "/issues/" not in issue_url:
+                continue
+            repo = issue_url.split("/issues/")[0].removeprefix("https://github.com/")
+            _, _, name = repo.partition("/")
+            if repo.lower() == "acidkill/bountyscout" or not name:
+                continue
+            if AGGREGATOR_NAME.search(name):
+                continue
+            found[issue_url] = item
     unknown = {
         url.split("/issues/")[0].removeprefix("https://github.com/")
         for url in found
@@ -449,7 +461,12 @@ def main() -> None:
     print(
         f"Scanned {len(found)} issues; {len(unknown)} unverified repositories (never alerted)"
     )
-    print("Source review sample: " + ", ".join(sorted(unknown)[:25]))
+    preferred = {org.lower() for org in ORGS}
+    source_review = sorted(
+        unknown,
+        key=lambda repo: (repo.split("/")[0].lower() not in preferred, repo),
+    )
+    print("Source review sample: " + ", ".join(source_review[:25]))
     seen = set(state["legacy_seen"]) | set(state["delivered"])
     candidates = []
     for url, item in found.items():
